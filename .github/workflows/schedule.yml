@@ -20,7 +20,7 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install themeparks google-sheet-db
+        run: npm install
 
       # Create the credentials file from the GitHub secret
       - name: Create Google Credentials File
