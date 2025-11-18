@@ -4,7 +4,6 @@
   "description": "Automated script for tracking Disney wait times and dining status.",
   "main": "disney_reporter.js",
   "dependencies": {
-    "themeparks": "https://github.com/cubehouse/themeparks.git#6.8.0",
     "google-sheet-db": "^1.0.1"
   }
 }
