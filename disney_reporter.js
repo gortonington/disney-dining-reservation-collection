@@ -1,7 +1,7 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   TARGET VERSION: themeparks@6.8.0
+   TARGET VERSION: themeparks@6.8.0 (Installed via GitHub URL)
 */
 
 // --- DEPENDENCIES ---
@@ -93,11 +93,12 @@ async function getWaitTimeData() {
     let WDW;
     
     // --- TARGETED CLASS INITIALIZATION (v6.8.0 uses Themeparks.WaltDisneyWorld) ---
+    // The previous failures proved this is the only correct path for this version
     if (Themeparks.WaltDisneyWorld) {
         WDW = new Themeparks.WaltDisneyWorld();
         console.log("Using Themeparks.WaltDisneyWorld (Targeting v6.8.0 structure)");
     } else {
-        // Fallback check to ensure the park class is available
+        // This should not happen if the GitHub URL install succeeded.
         throw new TypeError("Could not find Themeparks.WaltDisneyWorld class. The installed version is incompatible or the project structure is incorrect.");
     }
     
@@ -107,7 +108,6 @@ async function getWaitTimeData() {
 
     for (const facility of GRAND_FLORIDIAN_FACILITIES) {
         try {
-            // Note: The object structure returned by GetDestinationData() is relied upon here.
             const destinationData = await WDW.GetDestinationData();
             
             const facilityEntry = destinationData.facilities.find(f => f.id === facility.id);
