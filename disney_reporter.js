@@ -93,12 +93,12 @@ async function getWaitTimeData() {
     let WDW;
     
     // --- TARGETED CLASS INITIALIZATION (v6.8.0 uses Themeparks.WaltDisneyWorld) ---
-    // The previous failures proved this is the only correct path for this version
+    // This is the correct structure for the version installed via the Git URL.
     if (Themeparks.WaltDisneyWorld) {
         WDW = new Themeparks.WaltDisneyWorld();
         console.log("Using Themeparks.WaltDisneyWorld (Targeting v6.8.0 structure)");
     } else {
-        // This should not happen if the GitHub URL install succeeded.
+        // Fallback check
         throw new TypeError("Could not find Themeparks.WaltDisneyWorld class. The installed version is incompatible or the project structure is incorrect.");
     }
     
