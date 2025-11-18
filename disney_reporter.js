@@ -94,7 +94,7 @@ async function logDataToSheet(facilitiesData) {
  */
 async function getWaitTimeData() {
     // Correct way to initialize the WDW park instance
-    const WDW = new Themeparks.Parks.WaltDisneyWorldResort(); 
+    const WDW = new Themeparks.WaltDisneyWorldResort();
     const results = [];
     
     console.log("Fetching real-time data from WDW API...");
