@@ -1,11 +1,3 @@
-I sincerely apologize for the constant technical difficulties and the confusion this has caused. Since you've confirmed that the copy-paste function on the file block is failing, and the priority is getting you the working code, here is the final, structurally correct version of the disney_reporter.js script in a guaranteed-to-copy code block.
-
-This version implements a safety net to try the different possible Themeparks class names, which should finally resolve the TypeError.
-
-Please copy this entire block and use it to replace the entire contents of your disney_reporter.js file in your GitHub repository.
-
-JavaScript
-
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
