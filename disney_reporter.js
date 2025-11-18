@@ -1,8 +1,7 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   FIX: Implements a resilient strategy to find the correct WDW class name
-        across different installed versions of the 'themeparks' library.
+   TARGET VERSION: themeparks@6.8.0
 */
 
 // --- DEPENDENCIES ---
@@ -33,6 +32,7 @@ if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
 
 let YEARLY_SHEET_IDS_MAP;
 try {
+    // Parse the JSON string from the GitHub Secret
     YEARLY_SHEET_IDS_MAP = JSON.parse(process.env.YEARLY_SHEET_IDS);
 } catch (e) {
     console.error("FATAL ERROR: Failed to parse YEARLY_SHEET_IDS JSON environment variable.");
@@ -92,27 +92,13 @@ async function logDataToSheet(facilitiesData) {
 async function getWaitTimeData() {
     let WDW;
     
-    // --- RESILIENT CLASS INITIALIZATION ---
-    // Try the three most common ways the WDW resort class is exposed
-    
-    // 1. Try modern nested structure (e.g., v11+)
-    if (Themeparks.Parks && Themeparks.Parks.WaltDisneyWorldResort) {
-        WDW = new Themeparks.Parks.WaltDisneyWorldResort();
-        console.log("Using Themeparks.Parks.WaltDisneyWorldResort");
-    } 
-    // 2. Try older direct structure (e.g., v8-v10)
-    else if (Themeparks.WaltDisneyWorldResort) {
-        WDW = new Themeparks.WaltDisneyWorldResort();
-        console.log("Using Themeparks.WaltDisneyWorldResort");
-    }
-    // 3. Try legacy structure (e.g., v6)
-    else if (Themeparks.WaltDisneyWorld) {
+    // --- TARGETED CLASS INITIALIZATION (v6.8.0 uses Themeparks.WaltDisneyWorld) ---
+    if (Themeparks.WaltDisneyWorld) {
         WDW = new Themeparks.WaltDisneyWorld();
-        console.log("Using Themeparks.WaltDisneyWorld");
-    }
-    else {
-        // Fallback: If all attempts fail, the library is unusable.
-        throw new TypeError("Could not find Walt Disney World Resort class in Themeparks module. The installed version is incompatible.");
+        console.log("Using Themeparks.WaltDisneyWorld (Targeting v6.8.0 structure)");
+    } else {
+        // Fallback check to ensure the park class is available
+        throw new TypeError("Could not find Themeparks.WaltDisneyWorld class. The installed version is incompatible or the project structure is incorrect.");
     }
     
     const results = [];
@@ -121,8 +107,7 @@ async function getWaitTimeData() {
 
     for (const facility of GRAND_FLORIDIAN_FACILITIES) {
         try {
-            // Note: The object structure returned by GetDestinationData() is consistent
-            // enough to rely on for facility lookups, even across major versions.
+            // Note: The object structure returned by GetDestinationData() is relied upon here.
             const destinationData = await WDW.GetDestinationData();
             
             const facilityEntry = destinationData.facilities.find(f => f.id === facility.id);
@@ -181,13 +166,7 @@ async function runReport() {
         await logDataToSheet(facilityResults);
         console.log("\nReport complete. Check your Google Sheet document.");
     } catch (e) {
-        // Catch the explicit TypeError thrown if the WDW class could not be initialized
-        if (e instanceof TypeError) {
-             console.error("\nCRITICAL FAILURE during data fetch:", e.message);
-             console.error("ACTION REQUIRED: The current version of 'themeparks' on npm is incompatible. Try deleting your 'package.json' and replacing it with the latest stable version manually.");
-        } else {
-             console.error("\nCRITICAL FAILURE during data fetch:", e.message);
-        }
+        console.error("\nCRITICAL FAILURE during data fetch:", e.message);
     }
 }
 
