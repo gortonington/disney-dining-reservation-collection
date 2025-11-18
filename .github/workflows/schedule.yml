@@ -1,0 +1,38 @@
+name: Disney Data Reporter Schedule
+
+on:
+  schedule:
+    # Runs every 30 minutes (e.g., at :00 and :30 past the hour)
+    - cron: '0,30 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  run_data_reporter:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install themeparks google-sheet-db
+
+      # Create the credentials file from the GitHub secret
+      - name: Create Google Credentials File
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: |
+          echo "$GCP_CREDENTIALS" > google-credentials.json
+          
+      - name: Run Disney Reporter Script
+        # Pass the map of Sheet IDs as an environment variable to the Node script
+        env:
+          YEARLY_SHEET_IDS: ${{ secrets.YEARLY_SHEET_IDS }}
+        run: |
+          # The Node script reads this environment variable to find the correct Sheet ID
+          node disney_reporter.js
