@@ -1,19 +1,25 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   TARGET VERSION: themeparks@6.8.0 (Installed via GitHub URL)
+   ARCHITECTURE: Uses the stable, public ThemeParks.wiki API via fetch 
+   to eliminate dependency volatility.
 */
 
 // --- DEPENDENCIES ---
-const Themeparks = require('themeparks'); 
 const GoogleSheetDB = require('google-sheet-db');
 
 // --- CONFIGURATION ---
-const WDW_ID = '80007798';
+const THEMEPARKS_API_BASE = 'https://api.themeparks.wiki/v1';
+
+// ThemeParks.wiki Entity ID for Walt Disney World
+const WDW_RESORT_ENTITY_ID = '80007798'; 
+
 let CURRENT_SHEET_ID = null; 
 const CREDENTIALS_FILE = 'google-credentials.json'; 
+const FIXED_SHEET_TAB_NAME = 'Disney_Dining';
 
 // Key Facilities/Restaurants at Grand Floridian to track (Entity IDs)
+// These IDs are generally stable for the ThemeParks.wiki API
 const GRAND_FLORIDIAN_FACILITIES = [
     { name: 'Grand Floridian Cafe', id: '80010375' },
     { name: "Narcoossee's", id: '80010381' },
@@ -22,9 +28,6 @@ const GRAND_FLORIDIAN_FACILITIES = [
     { name: 'Space Mountain (MK)', id: '16975815' } 
 ];
 
-// The target sheet/tab name will be fixed for simplicity.
-const FIXED_SHEET_TAB_NAME = 'Disney_Dining';
-
 // --- GLOBAL ENVIRONMENT VARIABLE PARSING ---
 if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
     console.error("FATAL ERROR: Environment variable YEARLY_SHEET_IDS is missing.");
@@ -32,7 +35,6 @@ if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
 
 let YEARLY_SHEET_IDS_MAP;
 try {
-    // Parse the JSON string from the GitHub Secret
     YEARLY_SHEET_IDS_MAP = JSON.parse(process.env.YEARLY_SHEET_IDS);
 } catch (e) {
     console.error("FATAL ERROR: Failed to parse YEARLY_SHEET_IDS JSON environment variable.");
@@ -40,9 +42,6 @@ try {
 
 // --- CORE FUNCTIONS ---
 
-/**
- * Establishes connection to the correct annual Google Sheet document.
- */
 async function getSheetInstance() {
     if (!CURRENT_SHEET_ID) {
         return null;
@@ -62,9 +61,6 @@ async function getSheetInstance() {
     }
 }
 
-/**
- * Logs a new row of data to the Google Sheet.
- */
 async function logDataToSheet(facilitiesData) {
     const db = await getSheetInstance();
     if (!db) return;
@@ -87,56 +83,66 @@ async function logDataToSheet(facilitiesData) {
 }
 
 /**
- * Fetches the real-time wait status for the defined facilities.
+ * Fetches the real-time wait status for all facilities from the ThemeParks.wiki API.
  */
 async function getWaitTimeData() {
-    let WDW;
-    
-    // --- TARGETED CLASS INITIALIZATION (v6.8.0 uses Themeparks.WaltDisneyWorld) ---
-    // This is the correct structure for the version installed via the Git URL.
-    if (Themeparks.WaltDisneyWorld) {
-        WDW = new Themeparks.WaltDisneyWorld();
-        console.log("Using Themeparks.WaltDisneyWorld (Targeting v6.8.0 structure)");
-    } else {
-        // Fallback check
-        throw new TypeError("Could not find Themeparks.WaltDisneyWorld class. The installed version is incompatible or the project structure is incorrect.");
-    }
-    
     const results = [];
+    const url = `${THEMEPARKS_API_BASE}/entity/${WDW_RESORT_ENTITY_ID}/live`;
     
-    console.log("Fetching real-time data from WDW API...");
+    console.log(`Fetching real-time data from stable API: ${url}`);
 
-    for (const facility of GRAND_FLORIDIAN_FACILITIES) {
-        try {
-            const destinationData = await WDW.GetDestinationData();
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`API failed with status: ${response.status}`);
+        }
+        const data = await response.json();
+        
+        // The API returns all live data in the 'liveData' array
+        const liveDataMap = new Map();
+        if (data.liveData) {
+            data.liveData.forEach(item => {
+                liveDataMap.set(item.entityId, item);
+            });
+        }
+        
+        for (const facility of GRAND_FLORIDIAN_FACILITIES) {
+            const entry = liveDataMap.get(facility.id);
             
-            const facilityEntry = destinationData.facilities.find(f => f.id === facility.id);
+            let waitTime = 0;
+            let status = 'UNKNOWN';
             
-            if (facilityEntry) {
-                const waitTime = facilityEntry.waitTime ? facilityEntry.waitTime.activeWaitTime : null;
-                const status = facilityEntry.waitTime ? facilityEntry.waitTime.status : 'UNKNOWN';
-
-                console.log(`- ${facility.name}: Status=${status}, WaitTime=${waitTime} min`);
-
-                results.push({
-                    FacilityID: facility.id,
-                    Name: facility.name,
-                    WaitTimeMinutes: waitTime || 0,
-                    WaitTimeStatus: status,
-                });
-            } else {
-                console.warn(`- Facility ID not found for: ${facility.name}`);
+            if (entry && entry.queue && entry.queue.STANDBY) {
+                // If the facility has a standby queue (wait time or walk-up)
+                waitTime = entry.queue.STANDBY.waitTime || 0;
+                status = entry.queue.STANDBY.status || 'OPERATING';
+            } else if (entry && entry.status) {
+                 // For general status (e.g., CLOSED)
+                 status = entry.status;
             }
-        } catch (error) {
-            console.error(`Error fetching data for ${facility.name}:`, error.message);
+
+            console.log(`- ${facility.name}: Status=${status}, WaitTime=${waitTime} min`);
+
+            results.push({
+                FacilityID: facility.id,
+                Name: facility.name,
+                WaitTimeMinutes: waitTime,
+                WaitTimeStatus: status,
+            });
+        }
+    } catch (error) {
+        console.error("Critical API fetch error:", error.message);
+        // Fail gracefully for all facilities if the main API call fails
+        for (const facility of GRAND_FLORIDIAN_FACILITIES) {
             results.push({
                 FacilityID: facility.id,
                 Name: facility.name,
                 WaitTimeMinutes: 0,
-                WaitTimeStatus: 'ERROR',
+                WaitTimeStatus: 'API_ERROR',
             });
         }
     }
+    
     return results;
 }
 
@@ -164,9 +170,8 @@ async function runReport() {
     try {
         const facilityResults = await getWaitTimeData();
         await logDataToSheet(facilityResults);
-        console.log("\nReport complete. Check your Google Sheet document.");
     } catch (e) {
-        console.error("\nCRITICAL FAILURE during data fetch:", e.message);
+        console.error("\nCRITICAL FAILURE during report generation:", e.message);
     }
 }
 
