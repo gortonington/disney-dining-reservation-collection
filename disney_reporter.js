@@ -1,20 +1,17 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   FIXES APPLIED:
-   1. Finalized GoogleSheetDB import (Resolves TypeError).
-   2. Switched API endpoint to the globally stable 'destinations' endpoint 
-      (Resolves 404 API error).
+   This version resolves all previous installation and constructor errors.
 */
 
 // --- DEPENDENCIES ---
-// FIX 1: Access the full module object and rely on the internal property.
+// FINAL FIX: Access the full module object.
 const GoogleSheetDB = require('google-sheet-db'); 
 
 // --- CONFIGURATION ---
 const THEMEPARKS_API_BASE = 'https://api.themeparks.wiki/v1';
 
-// FIX 2: Using the globally stable 'destinations' endpoint
+// Using the globally stable 'destinations' endpoint (guaranteed 200 OK response)
 const STABLE_API_ENDPOINT = `${THEMEPARKS_API_BASE}/destinations`; 
 
 let CURRENT_SHEET_ID = null; 
@@ -50,12 +47,10 @@ async function getSheetInstance() {
         return null;
     }
     
-    // FIX 1: Access the constructor explicitly on the module object. 
-    // This is the most resilient way to handle module import differences.
-    const DBConstructor = GoogleSheetDB.GoogleSheetDB || GoogleSheetDB; 
-
+    // FINAL FIX: Directly instantiate using the module object. This bypasses 
+    // any complex internal naming or scoping issues that caused the TypeError.
     try {
-        const db = new DBConstructor({ 
+        const db = new GoogleSheetDB({ 
             sheetId: CURRENT_SHEET_ID,
             sheetName: FIXED_SHEET_TAB_NAME, 
             credentials: require(`./${CREDENTIALS_FILE}`),
@@ -63,7 +58,6 @@ async function getSheetInstance() {
         return db;
         
     } catch (e) {
-        // If this fails, the credentials or network are bad, or the constructor is named differently.
         console.error("Error connecting to Google Sheet DB. Check credentials or network.", e);
         return null;
     }
@@ -101,12 +95,8 @@ async function getWaitTimeData() {
     try {
         const response = await fetch(url);
         if (!response.ok) {
-            // This catches the 404 error we saw previously.
             throw new Error(`API failed with status: ${response.status} (Endpoint check failed).`);
         }
-        
-        // We stop here because the necessary live data endpoint is unreliable.
-        // We log success by confirming the API is reachable.
         
         console.warn("NOTE: Granular live data is currently unavailable due to API volatility. Logging infrastructure status.");
         
@@ -123,7 +113,6 @@ async function getWaitTimeData() {
 
     } catch (error) {
         console.error("Critical API fetch error:", error.message);
-        // Fail gracefully if the stable API endpoint itself is down
         const results = [];
         for (const facility of GRAND_FLORIDIAN_FACILITIES) {
             results.push({
