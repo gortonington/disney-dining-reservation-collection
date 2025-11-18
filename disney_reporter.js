@@ -1,17 +1,16 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   This version resolves all previous installation and constructor errors.
+   This version implements the Nested Constructor Hack to fix the final TypeError.
 */
 
 // --- DEPENDENCIES ---
-// FINAL FIX: Access the full module object.
 const GoogleSheetDB = require('google-sheet-db'); 
 
 // --- CONFIGURATION ---
 const THEMEPARKS_API_BASE = 'https://api.themeparks.wiki/v1';
 
-// Using the globally stable 'destinations' endpoint (guaranteed 200 OK response)
+// Using the globally stable 'destinations' endpoint
 const STABLE_API_ENDPOINT = `${THEMEPARKS_API_BASE}/destinations`; 
 
 let CURRENT_SHEET_ID = null; 
@@ -42,15 +41,37 @@ try {
 
 // --- CORE FUNCTIONS ---
 
+// The nested constructor hack function
+function getDBConstructor(module) {
+    // Check if the module is the function itself
+    if (typeof module === 'function') return module;
+    
+    // Check for common property names (like 'default' or the module name)
+    if (typeof module.default === 'function') return module.default;
+    if (typeof module.GoogleSheetDB === 'function') return module.GoogleSheetDB;
+    
+    // This handles the deepest nested structure of this specific library if present
+    if (module.default && typeof module.default === 'function') return module.default;
+
+    // Fallback: This is what was causing the original error if none of the above matched.
+    return null;
+}
+
 async function getSheetInstance() {
     if (!CURRENT_SHEET_ID) {
         return null;
     }
     
-    // FINAL FIX: Directly instantiate using the module object. This bypasses 
-    // any complex internal naming or scoping issues that caused the TypeError.
+    // FINAL FIX: Use the nested constructor hack
+    const DBConstructor = getDBConstructor(GoogleSheetDB); 
+    
+    if (!DBConstructor) {
+         console.error("FATAL: Could not find the GoogleSheetDB constructor function in the module.");
+         return null;
+    }
+
     try {
-        const db = new GoogleSheetDB({ 
+        const db = new DBConstructor({ 
             sheetId: CURRENT_SHEET_ID,
             sheetName: FIXED_SHEET_TAB_NAME, 
             credentials: require(`./${CREDENTIALS_FILE}`),
