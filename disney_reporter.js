@@ -1,23 +1,16 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-  FIX: Corrected the import structure for the 'themeparks' library 
-       to resolve the 'is not a constructor' error.
-
-  SETUP: Requires a GitHub Secret named YEARLY_SHEET_IDS 
-         with a JSON map of Year:SheetID.
+   This is the final, clean version for the GitHub Action.
 */
 
-// --- FIX APPLIED HERE: Import the full module object ---
+// --- DEPENDENCIES ---
 const Themeparks = require('themeparks'); 
 const GoogleSheetDB = require('google-sheet-db');
 
 // --- CONFIGURATION ---
-// Walt Disney World Resort ID
 const WDW_ID = '80007798';
-// Placeholder for the dynamically determined SHEET_ID
 let CURRENT_SHEET_ID = null; 
-// The filename of the JSON key downloaded from GitHub Secrets
 const CREDENTIALS_FILE = 'google-credentials.json'; 
 
 // Key Facilities/Restaurants at Grand Floridian to track (Entity IDs)
@@ -32,20 +25,35 @@ const GRAND_FLORIDIAN_FACILITIES = [
 // The target sheet/tab name will be fixed for simplicity.
 const FIXED_SHEET_TAB_NAME = 'Disney_Dining';
 
+// --- GLOBAL ENVIRONMENT VARIABLE PARSING ---
+// Get the Sheet ID map from the environment variable (injected by GitHub Actions)
+if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
+    console.error("FATAL ERROR: Environment variable YEARLY_SHEET_IDS is missing.");
+    // We cannot proceed, but we rely on the error being caught later.
+}
+
+let YEARLY_SHEET_IDS_MAP;
+try {
+    // Parse the JSON string from the GitHub Secret
+    YEARLY_SHEET_IDS_MAP = JSON.parse(process.env.YEARLY_SHEET_IDS);
+} catch (e) {
+    console.error("FATAL ERROR: Failed to parse YEARLY_SHEET_IDS JSON environment variable.");
+    // Leave YEARLY_SHEET_IDS_MAP undefined; runReport will handle the exit.
+}
+
 // --- CORE FUNCTIONS ---
 
 /**
- * Connects to the dynamically selected Google Sheet document.
+ * Establishes connection to the correct annual Google Sheet document.
  */
 async function getSheetInstance() {
     if (!CURRENT_SHEET_ID) {
-        console.error("Error: CURRENT_SHEET_ID is null. Cannot connect to Google Sheet.");
         return null;
     }
     
     try {
         const db = new GoogleSheetDB({
-            sheetId: CURRENT_SHEET_ID, // Use the dynamically set ID
+            sheetId: CURRENT_SHEET_ID,
             sheetName: FIXED_SHEET_TAB_NAME, 
             credentials: require(`./${CREDENTIALS_FILE}`),
         });
@@ -59,25 +67,100 @@ async function getSheetInstance() {
 
 /**
  * Logs a new row of data to the Google Sheet.
- * @param {Array<Object>} facilitiesData - Array of facility data objects to log.
  */
 async function logDataToSheet(facilitiesData) {
     const db = await getSheetInstance();
     if (!db) return;
 
-    // Map the fetched data to the column headers in the Google Sheet
     const dataToInsert = facilitiesData.map(data => ({
         DateTime: new Date().toLocaleString(),
         FacilityID: data.FacilityID,
         Name: data.Name,
         WaitTimeMinutes: data.WaitTimeMinutes,
         WaitTimeStatus: data.WaitTimeStatus,
-        // Reminder for manual action, as automated reservation checks are unstable/prohibited
         ReservationAvailability: 'N/A - Check Dining API Manually' 
     }));
 
-    // Log the action to the console
     console.log(`\nLogging ${dataToInsert.length} rows to Google Sheet (ID: ${CURRENT_SHEET_ID.substring(0, 8)}...).`);
     
-    // Insert row by row to ensure clean data insertion.
-    for
+    for (const row of dataToInsert) {
+        await db.insert(row);
+    }
+    console.log("Sheet update successful!");
+}
+
+/**
+ * Fetches the real-time wait status for the defined facilities.
+ */
+async function getWaitTimeData() {
+    // Correct way to initialize the WDW park instance
+    const WDW = new Themeparks.Parks.WaltDisneyWorldResort(); 
+    const results = [];
+    
+    console.log("Fetching real-time data from WDW API...");
+
+    for (const facility of GRAND_FLORIDIAN_FACILITIES) {
+        try {
+            const destinationData = await WDW.GetDestinationData();
+            
+            const facilityEntry = destinationData.facilities.find(f => f.id === facility.id);
+            
+            if (facilityEntry) {
+                const waitTime = facilityEntry.waitTime ? facilityEntry.waitTime.activeWaitTime : null;
+                const status = facilityEntry.waitTime ? facilityEntry.waitTime.status : 'UNKNOWN';
+
+                console.log(`- ${facility.name}: Status=${status}, WaitTime=${waitTime} min`);
+
+                results.push({
+                    FacilityID: facility.id,
+                    Name: facility.name,
+                    WaitTimeMinutes: waitTime || 0,
+                    WaitTimeStatus: status,
+                });
+            } else {
+                console.warn(`- Facility ID not found for: ${facility.name}`);
+            }
+        } catch (error) {
+            console.error(`Error fetching data for ${facility.name}:`, error.message);
+            results.push({
+                FacilityID: facility.id,
+                Name: facility.name,
+                WaitTimeMinutes: 0,
+                WaitTimeStatus: 'ERROR',
+            });
+        }
+    }
+    return results;
+}
+
+// --- MAIN EXECUTION ---
+
+async function runReport() {
+    // Check if the global parsing failed
+    if (!YEARLY_SHEET_IDS_MAP) {
+        console.error("Exiting due to environment variable setup error.");
+        return;
+    }
+    
+    const currentYear = new Date().getFullYear().toString();
+    
+    // Check for correct ID mapping
+    if (!YEARLY_SHEET_IDS_MAP[currentYear]) {
+        console.error(`FATAL ERROR: No Sheet ID found for current year (${currentYear}). 
+            Please manually create the Google Sheet for this year and update the 
+            YEARLY_SHEET_IDS secret in GitHub.`);
+        return;
+    }
+
+    CURRENT_SHEET_ID = YEARLY_SHEET_IDS_MAP[currentYear];
+    
+    console.log(`\nStarting Disney Data Report. Target Year: ${currentYear}`);
+    
+    const facilityResults = await getWaitTimeData();
+
+    await logDataToSheet(facilityResults);
+    
+    console.log("\nReport complete. Check your Google Sheet document.");
+}
+
+runReport();
