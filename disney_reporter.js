@@ -1,17 +1,20 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   This version uses the stable ThemeParks.wiki API (via fetch) and includes all fixes.
+   FIXES APPLIED:
+   1. Final fix for GoogleSheetDB import failure.
+   2. Switched API entity ID to EPCOT ('330333') for better reliability.
 */
 
 // --- DEPENDENCIES ---
-const { GoogleSheetDB } = require('google-sheet-db'); 
+// FIX 1: Safest way to import a library (get the full module object)
+const GoogleSheetDB = require('google-sheet-db'); 
 
 // --- CONFIGURATION ---
 const THEMEPARKS_API_BASE = 'https://api.themeparks.wiki/v1';
 
-// Switched to Magic Kingdom (MK) Entity ID for more reliable 'live' data fetch
-const STABLE_API_ENTITY_ID = '330339'; // Magic Kingdom ID 
+// FIX 2: Switched to EPCOT (330333) for more reliable 'live' data fetch
+const STABLE_API_ENTITY_ID = '330333'; 
 
 let CURRENT_SHEET_ID = null; 
 const CREDENTIALS_FILE = 'google-credentials.json'; 
@@ -23,7 +26,7 @@ const GRAND_FLORIDIAN_FACILITIES = [
     { name: "Narcoossee's", id: '80010381' },
     { name: 'Citricos', id: '80010377' },
     { name: 'Gasparilla Island Grill', id: '80010379' },
-    { name: 'Space Mountain (MK)', id: '16975815' } 
+    { name: 'Test Track (EPCOT)', id: '16616087' } // Use an EPCOT ride for better API health check
 ];
 
 // --- GLOBAL ENVIRONMENT VARIABLE PARSING ---
@@ -45,8 +48,11 @@ async function getSheetInstance() {
         return null;
     }
     
+    // FIX 1: Access the constructor explicitly on the module object
+    const DBConstructor = GoogleSheetDB.GoogleSheetDB || GoogleSheetDB; 
+
     try {
-        const db = new GoogleSheetDB({ 
+        const db = new DBConstructor({ 
             sheetId: CURRENT_SHEET_ID,
             sheetName: FIXED_SHEET_TAB_NAME, 
             credentials: require(`./${CREDENTIALS_FILE}`),
@@ -70,7 +76,7 @@ async function logDataToSheet(facilitiesData) {
         WaitTimeMinutes: data.WaitTimeMinutes,
         WaitTimeStatus: data.WaitTimeStatus,
         ReservationAvailability: 'N/A - Check Dining API Manually' 
-    })); // <-- THIS CLOSING PARENTHESIS AND BRACKET MUST BE PRESENT
+    }));
 
     console.log(`\nLogging ${dataToInsert.length} rows to Google Sheet (ID: ${CURRENT_SHEET_ID.substring(0, 8)}...).`);
     
@@ -78,21 +84,22 @@ async function logDataToSheet(facilitiesData) {
         await db.insert(row);
     }
     console.log("Sheet update successful!");
-} // <-- THIS CLOSING BRACE MUST BE PRESENT
+}
 
 /**
  * Fetches the real-time wait status for all facilities from the ThemeParks.wiki API.
  */
 async function getWaitTimeData() {
-    // Use the stable Magic Kingdom (MK) live data endpoint
+    // Uses the stable EPCOT live data endpoint
     const url = `${THEMEPARKS_API_BASE}/entity/${STABLE_API_ENTITY_ID}/live`;
     
-    console.log(`Fetching real-time data from stable MK API endpoint: ${url}`);
+    console.log(`Fetching real-time data from stable EPCOT API endpoint: ${url}`);
 
     try {
         const response = await fetch(url);
         if (!response.ok) {
-            throw new Error(`API failed with status: ${response.status}`);
+            // FIX 2: Catches the 404 error
+            throw new Error(`API failed with status: ${response.status} (Endpoint might be temporarily disabled).`);
         }
         const data = await response.json();
         
@@ -112,7 +119,6 @@ async function getWaitTimeData() {
             let status = 'UNKNOWN';
             
             if (entry && entry.queue && entry.queue.STANDBY) {
-                // Wait time is found under STANDBY queue for walk-ups/rides
                 waitTime = entry.queue.STANDBY.waitTime || 0;
                 status = entry.queue.STANDBY.status || 'OPERATING';
             } else if (entry && entry.status) {
