@@ -2,9 +2,9 @@ name: Disney Data Reporter Schedule
 
 on:
   schedule:
-    # Runs every 30 minutes (e.g., at :00 and :30 past the hour)
+    # Runs every 30 minutes
     - cron: '0,30 * * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   run_data_reporter:
@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Install dependencies (Reads fixed 6.8.0 version)
         run: npm install
 
       # Create the credentials file from the GitHub secret
@@ -30,9 +30,8 @@ jobs:
           echo "$GCP_CREDENTIALS" > google-credentials.json
           
       - name: Run Disney Reporter Script
-        # Pass the map of Sheet IDs as an environment variable to the Node script
+        # Passes the Sheet IDs map
         env:
           YEARLY_SHEET_IDS: ${{ secrets.YEARLY_SHEET_IDS }}
         run: |
-          # The Node script reads this environment variable to find the correct Sheet ID
           node disney_reporter.js
