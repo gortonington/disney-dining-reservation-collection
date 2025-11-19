@@ -2,8 +2,8 @@
    and log it to a Google Sheet document based on the current year.
 
    FIXES APPLIED:
-   1. Final fix for GoogleSheetDB -> google-spreadsheet authentication methods.
-   2. Uses robust JWT authentication structure (Constructor Injection).
+   1. Final fix for doc.useServiceAccountAuth is not a function.
+   2. Uses robust JWT authentication via Constructor Injection.
 */
 
 // --- DEPENDENCIES ---
@@ -59,7 +59,6 @@ async function logDataToSheet(facilitiesData) {
 
     try {
         // 1. FINAL FIX: Initialize and Authenticate via Constructor Injection (most stable method)
-        // This is the guaranteed way to pass Service Account credentials in this library version.
         const doc = new GoogleSpreadsheet(CURRENT_SHEET_ID, {
              auth: {
                 client_email: GOOGLE_CREDENTIALS.client_email,
@@ -95,7 +94,7 @@ async function logDataToSheet(facilitiesData) {
         console.log("Sheet update successful!");
         
     } catch (e) {
-        // This catch will provide a more detailed error on the "Login Required" failure.
+        // This should catch the final "Login Required" failure point.
         console.error(`CRITICAL ERROR WRITING TO SHEET: ${e.message}.`);
         console.error(`Check 1: Service Account has Editor access. Check 2: The private key is correctly escaped.`);
     }
