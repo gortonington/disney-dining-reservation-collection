@@ -1,12 +1,11 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   FINAL ARCHITECTURE: Uses the robust 'google-spreadsheet' library
-   to guarantee successful authentication in GitHub Actions.
+   FINAL FIX: Switched to Constructor Injection for Service Account Auth 
+   to bypass method signature errors.
 */
 
 // --- DEPENDENCIES ---
-// Use the robust Google Sheets library
 const { GoogleSpreadsheet } = require('google-spreadsheet'); 
 
 // --- CONFIGURATION ---
@@ -41,7 +40,6 @@ try {
 // FINAL FIX: Load Credentials Synchronously
 let GOOGLE_CREDENTIALS;
 try {
-    // Load credentials synchronously for reliability in GitHub Actions
     GOOGLE_CREDENTIALS = require(`./${CREDENTIALS_FILE}`);
 } catch (e) {
     console.error(`FATAL ERROR: Could not load local Google credentials file: ${e.message}`);
@@ -59,20 +57,19 @@ async function logDataToSheet(facilitiesData) {
     }
 
     try {
-        // 1. Initialize the GoogleSpreadsheet document using the ID
-        const doc = new GoogleSpreadsheet(CURRENT_SHEET_ID);
-
-        // 2. Authenticate using the Service Account JWT
-        await doc.useServiceAccountAuth({
-            client_email: GOOGLE_CREDENTIALS.client_email,
-            private_key: GOOGLE_CREDENTIALS.private_key,
+        // 1. FINAL FIX: Initialize and Authenticate via Constructor Injection (most stable method)
+        const doc = new GoogleSpreadsheet(CURRENT_SHEET_ID, {
+             auth: {
+                client_email: GOOGLE_CREDENTIALS.client_email,
+                private_key: GOOGLE_CREDENTIALS.private_key,
+            }
         });
 
-        // 3. Load document properties and get the target sheet (tab)
+        // 2. Load document properties and get the target sheet (tab)
         await doc.loadInfo(); 
         let sheet = doc.sheetsByTitle[FIXED_SHEET_TAB_NAME];
 
-        // 4. If sheet does not exist, create it and set headers
+        // 3. If sheet does not exist, create it and set headers
         if (!sheet) {
             console.log(`Sheet "${FIXED_SHEET_TAB_NAME}" not found. Creating new sheet and headers...`);
             sheet = await doc.addSheet({ title: FIXED_SHEET_TAB_NAME });
@@ -81,7 +78,7 @@ async function logDataToSheet(facilitiesData) {
             ]);
         }
         
-        // 5. Map data and insert rows
+        // 4. Map data and insert rows
         const dataToInsert = facilitiesData.map(data => ({
             DateTime: new Date().toLocaleString(),
             FacilityID: data.FacilityID,
@@ -96,9 +93,9 @@ async function logDataToSheet(facilitiesData) {
         console.log("Sheet update successful!");
         
     } catch (e) {
-        // This should catch the "Login Required" failure point if it occurs
+        // This should catch the final "Login Required" failure point.
         console.error(`CRITICAL ERROR WRITING TO SHEET: ${e.message}.`);
-        console.error("Check 1: Sheet ID is correct. Check 2: Service Account has Editor access to the specific file.");
+        console.error(`Check 1: Service Account has Editor access. Check 2: Google Drive API is enabled.`);
     }
 }
 
@@ -118,7 +115,6 @@ async function getWaitTimeData() {
         
         console.warn("NOTE: Granular live data is currently unavailable due to API volatility. Logging infrastructure status.");
         
-        // Return successful API health check status
         const results = [];
         for (const facility of GRAND_FLORIDIAN_FACILITIES) {
             results.push({
@@ -132,7 +128,6 @@ async function getWaitTimeData() {
 
     } catch (error) {
         console.error("Critical API fetch error:", error.message);
-        // Return API error status
         const results = [];
         for (const facility of GRAND_FLORIDIAN_FACILITIES) {
             results.push({
