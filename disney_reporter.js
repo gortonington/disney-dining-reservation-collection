@@ -2,8 +2,8 @@
    and log it to a Google Sheet document based on the current year.
 
    FIXES APPLIED:
-   1. Final fix for doc.useServiceAccountAuth is not a function.
-   2. Uses robust JWT authentication via Constructor Injection.
+   1. FINAL AUTH FIX: Uses the explicit doc.useServiceAccountAuth() method 
+      required by the stable 3.1.15 version of the library.
 */
 
 // --- DEPENDENCIES ---
@@ -58,19 +58,20 @@ async function logDataToSheet(facilitiesData) {
     }
 
     try {
-        // 1. FINAL FIX: Initialize and Authenticate via Constructor Injection (most stable method)
-        const doc = new GoogleSpreadsheet(CURRENT_SHEET_ID, {
-             auth: {
-                client_email: GOOGLE_CREDENTIALS.client_email,
-                private_key: GOOGLE_CREDENTIALS.private_key,
-            }
+        // 1. Initialize the GoogleSpreadsheet document
+        const doc = new GoogleSpreadsheet(CURRENT_SHEET_ID);
+
+        // 2. FINAL FIX: Authenticate using the explicit method (required by v3.x)
+        await doc.useServiceAccountAuth({
+            client_email: GOOGLE_CREDENTIALS.client_email,
+            private_key: GOOGLE_CREDENTIALS.private_key,
         });
 
-        // 2. Load document properties and get the target sheet (tab)
+        // 3. Load document properties and get the target sheet (tab)
         await doc.loadInfo(); 
         let sheet = doc.sheetsByTitle[FIXED_SHEET_TAB_NAME];
 
-        // 3. If sheet does not exist, create it and set headers
+        // 4. If sheet does not exist, create it and set headers
         if (!sheet) {
             console.log(`Sheet "${FIXED_SHEET_TAB_NAME}" not found. Creating new sheet and headers...`);
             sheet = await doc.addSheet({ title: FIXED_SHEET_TAB_NAME });
@@ -79,7 +80,7 @@ async function logDataToSheet(facilitiesData) {
             ]);
         }
         
-        // 4. Map data and insert rows
+        // 5. Map data and insert rows
         const dataToInsert = facilitiesData.map(data => ({
             DateTime: new Date().toLocaleString(),
             FacilityID: data.FacilityID,
@@ -96,7 +97,7 @@ async function logDataToSheet(facilitiesData) {
     } catch (e) {
         // This should catch the final "Login Required" failure point.
         console.error(`CRITICAL ERROR WRITING TO SHEET: ${e.message}.`);
-        console.error(`Check 1: Service Account has Editor access. Check 2: The private key is correctly escaped.`);
+        console.error(`ACTION REQUIRED: The service account key may be invalid or the key's private key requires re-escaping.`);
     }
 }
 
