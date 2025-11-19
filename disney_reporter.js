@@ -1,8 +1,7 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   This version implements the FINAL FIX: loading credentials synchronously 
-   at the start to ensure the DB connection is fully authorized.
+   This version implements the Universal Constructor Hack to fix the final TypeError.
 */
 
 // --- DEPENDENCIES ---
@@ -24,45 +23,63 @@ const GRAND_FLORIDIAN_FACILITIES = [
     { name: 'Space Mountain (MK)', id: '16975815' } 
 ];
 
-// --- GLOBAL VARIABLE PARSING & CREDENTIAL LOADING ---
-
+// --- GLOBAL ENVIRONMENT VARIABLE PARSING ---
 if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
     console.error("FATAL ERROR: Environment variable YEARLY_SHEET_IDS is missing.");
 }
 
 let YEARLY_SHEET_IDS_MAP;
 try {
+    // Parse the JSON string from the GitHub Secret
     YEARLY_SHEET_IDS_MAP = JSON.parse(process.env.YEARLY_SHEET_IDS);
 } catch (e) {
     console.error("FATAL ERROR: Failed to parse YEARLY_SHEET_IDS JSON environment variable.");
 }
 
-// FINAL FIX: Load Credentials Synchronously
+// --- FINAL FIX: Load Credentials Synchronously ---
 let GOOGLE_CREDENTIALS;
 try {
-    // This synchronous require call should be the most reliable way to load the JSON 
-    // file created by the GitHub Action environment.
+    // Load credentials synchronously for reliability in GitHub Actions
     GOOGLE_CREDENTIALS = require(`./${CREDENTIALS_FILE}`);
 } catch (e) {
     console.error(`FATAL ERROR: Could not load local Google credentials file: ${e.message}`);
 }
 // --- END GLOBAL LOADING ---
 
+
 // --- CORE FUNCTIONS ---
+
+// UNIVERSAL CONSTRUCTOR HACK FUNCTION (for fixing TypeError: not a constructor)
+function getDBConstructor(module) {
+    // 1. Try the most common export forms: function itself, .default, or named export.
+    if (typeof module === 'function') return module;
+    if (typeof module.default === 'function') return module.default;
+    if (typeof module.GoogleSheetDB === 'function') return module.GoogleSheetDB;
+    
+    // 2. Try the constructor from its prototype chain (for older require compatibility)
+    if (module.default && typeof module.default.default === 'function') return module.default.default;
+
+    return null;
+}
 
 async function getSheetInstance() {
     if (!CURRENT_SHEET_ID || !GOOGLE_CREDENTIALS) {
         return null;
     }
     
-    // The DB Constructor is the function itself (GoogleSheetDB)
-    const DBConstructor = GoogleSheetDB; 
+    // Use the universal hack to find the constructor function
+    const DBConstructor = getDBConstructor(GoogleSheetDB); 
+    
+    if (!DBConstructor) {
+         console.error("FATAL: Could not find the GoogleSheetDB constructor function in the module.");
+         return null;
+    }
 
     try {
         const db = new DBConstructor({ 
             sheetId: CURRENT_SHEET_ID,
             sheetName: 'Disney_Dining', 
-            credentials: GOOGLE_CREDENTIALS, // Use the synchronously loaded credentials
+            credentials: GOOGLE_CREDENTIALS,
         });
         return db;
         
@@ -147,7 +164,6 @@ async function getWaitTimeData() {
 
 async function runReport() {
     if (!YEARLY_SHEET_IDS_MAP || !GOOGLE_CREDENTIALS) {
-        // Exits cleanly if global variables failed to load
         console.error("Exiting due to critical configuration errors.");
         return;
     }
