@@ -1,11 +1,13 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   This version implements the Universal Constructor Hack to fix the final TypeError.
+   FINAL ARCHITECTURE: Uses the robust 'google-spreadsheet' library
+   to guarantee successful authentication in GitHub Actions.
 */
 
 // --- DEPENDENCIES ---
-const GoogleSheetDB = require('google-sheet-db'); 
+// Use the robust Google Sheets library
+const { GoogleSpreadsheet } = require('google-spreadsheet'); 
 
 // --- CONFIGURATION ---
 const THEMEPARKS_API_BASE = 'https://api.themeparks.wiki/v1';
@@ -22,6 +24,7 @@ const GRAND_FLORIDIAN_FACILITIES = [
     { name: 'Gasparilla Island Grill', id: '80010379' },
     { name: 'Space Mountain (MK)', id: '16975815' } 
 ];
+const FIXED_SHEET_TAB_NAME = 'Disney_Dining';
 
 // --- GLOBAL ENVIRONMENT VARIABLE PARSING ---
 if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
@@ -30,13 +33,12 @@ if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
 
 let YEARLY_SHEET_IDS_MAP;
 try {
-    // Parse the JSON string from the GitHub Secret
     YEARLY_SHEET_IDS_MAP = JSON.parse(process.env.YEARLY_SHEET_IDS);
 } catch (e) {
     console.error("FATAL ERROR: Failed to parse YEARLY_SHEET_IDS JSON environment variable.");
 }
 
-// --- FINAL FIX: Load Credentials Synchronously ---
+// FINAL FIX: Load Credentials Synchronously
 let GOOGLE_CREDENTIALS;
 try {
     // Load credentials synchronously for reliability in GitHub Actions
@@ -47,74 +49,56 @@ try {
 // --- END GLOBAL LOADING ---
 
 
-// --- CORE FUNCTIONS ---
-
-// UNIVERSAL CONSTRUCTOR HACK FUNCTION (for fixing TypeError: not a constructor)
-function getDBConstructor(module) {
-    // 1. Try the most common export forms: function itself, .default, or named export.
-    if (typeof module === 'function') return module;
-    if (typeof module.default === 'function') return module.default;
-    if (typeof module.GoogleSheetDB === 'function') return module.GoogleSheetDB;
-    
-    // 2. Try the constructor from its prototype chain (for older require compatibility)
-    if (module.default && typeof module.default.default === 'function') return module.default.default;
-
-    return null;
-}
-
-async function getSheetInstance() {
+/**
+ * Authenticates with Google and writes data to the target sheet.
+ */
+async function logDataToSheet(facilitiesData) {
     if (!CURRENT_SHEET_ID || !GOOGLE_CREDENTIALS) {
-        return null;
-    }
-    
-    // Use the universal hack to find the constructor function
-    const DBConstructor = getDBConstructor(GoogleSheetDB); 
-    
-    if (!DBConstructor) {
-         console.error("FATAL: Could not find the GoogleSheetDB constructor function in the module.");
-         return null;
+        console.error("Logging aborted: Missing Sheet ID or Credentials.");
+        return;
     }
 
     try {
-        const db = new DBConstructor({ 
-            sheetId: CURRENT_SHEET_ID,
-            sheetName: 'Disney_Dining', 
-            credentials: GOOGLE_CREDENTIALS,
+        // 1. Initialize the GoogleSpreadsheet document using the ID
+        const doc = new GoogleSpreadsheet(CURRENT_SHEET_ID);
+
+        // 2. Authenticate using the Service Account JWT
+        await doc.useServiceAccountAuth({
+            client_email: GOOGLE_CREDENTIALS.client_email,
+            private_key: GOOGLE_CREDENTIALS.private_key,
         });
-        return db;
+
+        // 3. Load document properties and get the target sheet (tab)
+        await doc.loadInfo(); 
+        let sheet = doc.sheetsByTitle[FIXED_SHEET_TAB_NAME];
+
+        // 4. If sheet does not exist, create it and set headers
+        if (!sheet) {
+            console.log(`Sheet "${FIXED_SHEET_TAB_NAME}" not found. Creating new sheet and headers...`);
+            sheet = await doc.addSheet({ title: FIXED_SHEET_TAB_NAME });
+            await sheet.setHeaderRow([
+                'DateTime', 'FacilityID', 'Name', 'WaitTimeMinutes', 'WaitTimeStatus', 'ReservationAvailability'
+            ]);
+        }
+        
+        // 5. Map data and insert rows
+        const dataToInsert = facilitiesData.map(data => ({
+            DateTime: new Date().toLocaleString(),
+            FacilityID: data.FacilityID,
+            Name: data.Name,
+            WaitTimeMinutes: data.WaitTimeMinutes,
+            WaitTimeStatus: data.WaitTimeStatus,
+            ReservationAvailability: 'N/A - Check Dining API Manually'
+        }));
+
+        console.log(`\nLogging ${dataToInsert.length} rows to Google Sheet...`);
+        await sheet.addRows(dataToInsert);
+        console.log("Sheet update successful!");
         
     } catch (e) {
-        console.error(`Internal DB Connection Error: ${e.message}`);
-        return null;
-    }
-}
-
-async function logDataToSheet(facilitiesData) {
-    const db = await getSheetInstance();
-    if (!db) {
-         console.error("Logging aborted: Sheet instance not available.");
-         return;
-    }
-
-    const dataToInsert = facilitiesData.map(data => ({
-        DateTime: new Date().toLocaleString(),
-        FacilityID: data.FacilityID,
-        Name: data.Name,
-        WaitTimeMinutes: data.WaitTimeMinutes,
-        WaitTimeStatus: data.WaitTimeStatus,
-        ReservationAvailability: 'N/A - Check Dining API Manually' 
-    }));
-
-    console.log(`\nLogging ${dataToInsert.length} rows to Google Sheet (ID: ${CURRENT_SHEET_ID.substring(0, 8)}...).`);
-    
-    try {
-        for (const row of dataToInsert) {
-            await db.insert(row);
-        }
-        console.log("Sheet update successful!");
-    } catch (e) {
-        // This catch will provide a more detailed error on the "Login Required" failure.
-        console.error(`ERROR WRITING TO SHEET: ${e.message}. This is the "Login Required" failure point.`);
+        // This should catch the "Login Required" failure point if it occurs
+        console.error(`CRITICAL ERROR WRITING TO SHEET: ${e.message}.`);
+        console.error("Check 1: Sheet ID is correct. Check 2: Service Account has Editor access to the specific file.");
     }
 }
 
@@ -134,6 +118,7 @@ async function getWaitTimeData() {
         
         console.warn("NOTE: Granular live data is currently unavailable due to API volatility. Logging infrastructure status.");
         
+        // Return successful API health check status
         const results = [];
         for (const facility of GRAND_FLORIDIAN_FACILITIES) {
             results.push({
@@ -147,6 +132,7 @@ async function getWaitTimeData() {
 
     } catch (error) {
         console.error("Critical API fetch error:", error.message);
+        // Return API error status
         const results = [];
         for (const facility of GRAND_FLORIDIAN_FACILITIES) {
             results.push({
