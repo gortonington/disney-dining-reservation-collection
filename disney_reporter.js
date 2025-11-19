@@ -1,7 +1,8 @@
 /* Node.js Script to pull real-time Walt Disney World (WDW) data 
    and log it to a Google Sheet document based on the current year.
 
-   This version implements the Nested Constructor Hack to fix the final TypeError.
+   This version implements the FINAL FIX: loading credentials synchronously 
+   at the start to ensure the DB connection is fully authorized.
 */
 
 // --- DEPENDENCIES ---
@@ -9,15 +10,12 @@ const GoogleSheetDB = require('google-sheet-db');
 
 // --- CONFIGURATION ---
 const THEMEPARKS_API_BASE = 'https://api.themeparks.wiki/v1';
-
-// Using the globally stable 'destinations' endpoint
 const STABLE_API_ENDPOINT = `${THEMEPARKS_API_BASE}/destinations`; 
 
 let CURRENT_SHEET_ID = null; 
 const CREDENTIALS_FILE = 'google-credentials.json'; 
-const FIXED_SHEET_TAB_NAME = 'Disney_Dining';
 
-// Key Facilities/Restaurants at Grand Floridian to track (Entity IDs)
+// Key Facilities/Restaurants
 const GRAND_FLORIDIAN_FACILITIES = [
     { name: 'Grand Floridian Cafe', id: '80010375' },
     { name: "Narcoossee's", id: '80010381' },
@@ -26,67 +24,60 @@ const GRAND_FLORIDIAN_FACILITIES = [
     { name: 'Space Mountain (MK)', id: '16975815' } 
 ];
 
-// --- GLOBAL ENVIRONMENT VARIABLE PARSING ---
+// --- GLOBAL VARIABLE PARSING & CREDENTIAL LOADING ---
+
 if (typeof process.env.YEARLY_SHEET_IDS === 'undefined') {
     console.error("FATAL ERROR: Environment variable YEARLY_SHEET_IDS is missing.");
 }
 
 let YEARLY_SHEET_IDS_MAP;
 try {
-    // Parse the JSON string from the GitHub Secret
     YEARLY_SHEET_IDS_MAP = JSON.parse(process.env.YEARLY_SHEET_IDS);
 } catch (e) {
     console.error("FATAL ERROR: Failed to parse YEARLY_SHEET_IDS JSON environment variable.");
 }
 
+// FINAL FIX: Load Credentials Synchronously
+let GOOGLE_CREDENTIALS;
+try {
+    // This synchronous require call should be the most reliable way to load the JSON 
+    // file created by the GitHub Action environment.
+    GOOGLE_CREDENTIALS = require(`./${CREDENTIALS_FILE}`);
+} catch (e) {
+    console.error(`FATAL ERROR: Could not load local Google credentials file: ${e.message}`);
+}
+// --- END GLOBAL LOADING ---
+
 // --- CORE FUNCTIONS ---
 
-// The nested constructor hack function
-function getDBConstructor(module) {
-    // Check if the module is the function itself
-    if (typeof module === 'function') return module;
-    
-    // Check for common property names (like 'default' or the module name)
-    if (typeof module.default === 'function') return module.default;
-    if (typeof module.GoogleSheetDB === 'function') return module.GoogleSheetDB;
-    
-    // This handles the deepest nested structure of this specific library if present
-    if (module.default && typeof module.default === 'function') return module.default;
-
-    // Fallback: This is what was causing the original error if none of the above matched.
-    return null;
-}
-
 async function getSheetInstance() {
-    if (!CURRENT_SHEET_ID) {
+    if (!CURRENT_SHEET_ID || !GOOGLE_CREDENTIALS) {
         return null;
     }
     
-    // FINAL FIX: Use the nested constructor hack
-    const DBConstructor = getDBConstructor(GoogleSheetDB); 
-    
-    if (!DBConstructor) {
-         console.error("FATAL: Could not find the GoogleSheetDB constructor function in the module.");
-         return null;
-    }
+    // The DB Constructor is the function itself (GoogleSheetDB)
+    const DBConstructor = GoogleSheetDB; 
 
     try {
         const db = new DBConstructor({ 
             sheetId: CURRENT_SHEET_ID,
-            sheetName: FIXED_SHEET_TAB_NAME, 
-            credentials: require(`./${CREDENTIALS_FILE}`),
+            sheetName: 'Disney_Dining', 
+            credentials: GOOGLE_CREDENTIALS, // Use the synchronously loaded credentials
         });
         return db;
         
     } catch (e) {
-        console.error("Error connecting to Google Sheet DB. Check credentials or network.", e);
+        console.error(`Internal DB Connection Error: ${e.message}`);
         return null;
     }
 }
 
 async function logDataToSheet(facilitiesData) {
     const db = await getSheetInstance();
-    if (!db) return;
+    if (!db) {
+         console.error("Logging aborted: Sheet instance not available.");
+         return;
+    }
 
     const dataToInsert = facilitiesData.map(data => ({
         DateTime: new Date().toLocaleString(),
@@ -99,10 +90,15 @@ async function logDataToSheet(facilitiesData) {
 
     console.log(`\nLogging ${dataToInsert.length} rows to Google Sheet (ID: ${CURRENT_SHEET_ID.substring(0, 8)}...).`);
     
-    for (const row of dataToInsert) {
-        await db.insert(row);
+    try {
+        for (const row of dataToInsert) {
+            await db.insert(row);
+        }
+        console.log("Sheet update successful!");
+    } catch (e) {
+        // This catch will provide a more detailed error on the "Login Required" failure.
+        console.error(`ERROR WRITING TO SHEET: ${e.message}. This is the "Login Required" failure point.`);
     }
-    console.log("Sheet update successful!");
 }
 
 /**
@@ -150,8 +146,9 @@ async function getWaitTimeData() {
 // --- MAIN EXECUTION ---
 
 async function runReport() {
-    if (!YEARLY_SHEET_IDS_MAP) {
-        console.error("Exiting due to environment variable setup error.");
+    if (!YEARLY_SHEET_IDS_MAP || !GOOGLE_CREDENTIALS) {
+        // Exits cleanly if global variables failed to load
+        console.error("Exiting due to critical configuration errors.");
         return;
     }
     
